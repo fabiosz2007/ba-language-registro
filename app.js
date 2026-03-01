@@ -1498,6 +1498,42 @@ async function saveParticipante() {
         return;
     }
     
+    // VALIDAR DUPLICADOS POR NOMBRE Y EMAIL
+    let query = supabase
+        .from('participantes')
+        .select('id, nombre, email');
+    
+    // Si estamos editando, excluir el registro actual
+    if (editingId) {
+        query = query.neq('id', editingId);
+    }
+    
+    const { data: existentes } = await query;
+    
+    if (existentes && existentes.length > 0) {
+        // Verificar duplicado por nombre (case insensitive)
+        const duplicadoNombre = existentes.find(p => 
+            p.nombre.toLowerCase() === nombre.toLowerCase()
+        );
+        
+        if (duplicadoNombre) {
+            showModalAlert('participanteModalAlert', `⚠️ Ya existe un participante con el nombre "${duplicadoNombre.nombre}"`, 'error');
+            return;
+        }
+        
+        // Si tiene email, verificar duplicado por email
+        if (email) {
+            const duplicadoEmail = existentes.find(p => 
+                p.email && p.email.toLowerCase() === email.toLowerCase()
+            );
+            
+            if (duplicadoEmail) {
+                showModalAlert('participanteModalAlert', `⚠️ Ya existe un participante con el email "${duplicadoEmail.email}" (${duplicadoEmail.nombre})`, 'error');
+                return;
+            }
+        }
+    }
+    
     const participanteData = {
         nombre: nombre,
         email: email || null,
