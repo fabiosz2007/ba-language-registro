@@ -1,5 +1,4 @@
 // CONFIGURACIÓN - Sistema BA Language
-import { createClient } from ‘https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm’
 
 const SUPABASE_URL = ‘https://nqidcovrjzywiilzdffy.supabase.co’;
 const SUPABASE_KEY = ‘eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xaWRjb3Zyanp5d2lpbHpkZmZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExNjczMjEsImV4cCI6MjA4Njc0MzMyMX0.bbj4aBkoKKP64oS_4gVQlIdNXIhnj4dWSk7FxOC0Dpo’;
@@ -4140,4 +4139,4 @@ window.showBuscarDisponibilidad = showBuscarDisponibilidad;
 window.ejecutarBusqueda = ejecutarBusqueda;
 window.agregarHorario = agregarHorario;
 window.eliminarHorario = eliminarHorario;
-window.calcularHoraFin = calcularHoraFin;app
+window.calcularHoraFin = calcularHoraFin;
