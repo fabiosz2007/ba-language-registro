@@ -3,7 +3,14 @@
 const SUPABASE_URL = 'https://nqidcovrjzywiilzdffy.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xaWRjb3Zyanp5d2lpbHpkZmZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExNjczMjEsImV4cCI6MjA4Njc0MzMyMX0.bbj4aBkoKKP64oS_4gVQlIdNXIhnj4dWSk7FxOC0Dpo';
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Esperar a que Supabase se cargue
+let supabase;
+if (window.supabase && window.supabase.createClient) {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+} else {
+    console.error('ERROR CRÍTICO: Supabase no se cargó. Verifica la conexión a internet.');
+    alert('Error al cargar el sistema. Por favor recargá la página (Ctrl+R).');
+}
 
 let currentUser = null;
 let isAdmin = false;
