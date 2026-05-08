@@ -3949,10 +3949,384 @@ window.editCliente = editCliente;
 
 async function showMisClases() {
     showScreen('misClasesScreen');
+    
+    // Cargar cursos de la profesora en el filtro
+    const { data: cursosProf } = await supabase
+        .from('cursos_profesoras')
+        .select('curso_id, cursos(id, codigo_curso)')
+        .eq('profesora_id', currentUser.id)
+        .eq('activo', true);
+    
+    const selCurso = document.getElementById('misClasesCurso');
+    selCurso.innerHTML = '<option value="">Todos los cursos</option>';
+    if (cursosProf) {
+        cursosProf.forEach(c => {
+            if (c.cursos) selCurso.innerHTML += `<option value="${c.curso_id}">${c.cursos.codigo_curso}</option>`;
+        });
+    }
+    
     await cargarMisClases();
 }
 
 async function cargarMisClases() {
+    const filtroMes = document.getElementById('misClasesMes').value;
+    const filtroCurso = document.getElementById('misClasesCurso').value;
+    
+    let query = supabase
+        .from('clases')
+        .select('*, cursos(codigo_curso, clientes(nombre))')
+        .eq('profesora_id', currentUser.id)
+        .order('fecha', { ascending: false });
+    
+    if (filtroMes) {
+        const [anio, mes] = filtroMes.split('-');
+        const diasMes = new Date(anio, mes, 0).getDate();
+        query = query.gte('fecha', `${anio}-${mes}-01`).lte('fecha', `${anio}-${mes}-${diasMes}`);
+    }
+    if (filtroCurso) query = query.eq('curso_id', filtroCurso);
+    
+    const { data: clases } = await query;
+    
+    const tbody = document.querySelector('#misClasesTable tbody');
+    tbody.innerHTML = '';
+    
+    if (!clases || clases.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No se encontraron clases</td></tr>';
+        return;
+    }
+    
+    const estadosLabel = {
+        'dictada': '✅ Dictada',
+        'cancelada_profesora': '🔴 Cancel. Profesora',
+        'cancelada_empresa': '🏢 Cancel. Empresa',
+        'suspendida': '⚪ Suspendida',
+        'feriado': '❄️ Feriado'
+    };
+    
+    clases.forEach(clase => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${clase.fecha}</td>
+            <td>${clase.cursos ? clase.cursos.codigo_curso : '-'}</td>
+            <td>${clase.cursos?.clientes ? clase.cursos.clientes.nombre : '-'}</td>
+            <td>${estadosLabel[clase.estado] || clase.estado}</td>
+            <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${clase.temas_tratados || ''}">${clase.temas_tratados ? clase.temas_tratados.substring(0, 40) + (clase.temas_tratados.length > 40 ? '...' : '') : '-'}</td>
+            <td><button class="btn btn-warning btn-small" onclick="abrirModalEditarClase('${clase.id}')">Editar</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+async function abrirModalEditarClase(claseId) {
+    const { data: clase } = await supabase
+        .from('clases')
+        .select('*, cursos(codigo_curso, duracion_horas)')
+        .eq('id', claseId)
+        .single();
+    
+    if (!clase) { alert('No se pudo cargar la clase'); return; }
+    
+    // Poblar modal
+    document.getElementById('editClaseId').value = claseId;
+    document.getElementById('editClaseFecha').value = clase.fecha;
+    document.getElementById('editClaseHora').value = clase.hora_inicio;
+    document.getElementById('editClaseEstado').value = clase.estado;
+    document.getElementById('editClaseTemas').value = clase.temas_tratados || '';
+    document.getElementById('editClaseMotivo').value = clase.motivo_cancelacion || '';
+    document.getElementById('editClaseEsRecup').checked = clase.es_recuperacion;
+    
+    const titulo = document.getElementById('editClaseTitulo');
+    if (titulo) titulo.textContent = `Editar: ${clase.cursos?.codigo_curso || ''} - ${clase.fecha}`;
+    
+    // Mostrar/ocultar campos según estado
+    toggleEditClaseCampos(clase.estado);
+    
+    // Cargar asistencias si fue dictada
+    if (clase.estado === 'dictada') {
+        await cargarAsistenciasParaEditar(clase.curso_id, claseId);
+    }
+    
+    openModal('editClaseModal');
+}
+
+function toggleEditClaseCampos(estado) {
+    const temasDiv = document.getElementById('editClaseTemasDiv');
+    const motivoDiv = document.getElementById('editClaseMotivoDiv');
+    const participantesDiv = document.getElementById('editClaseParticipantesDiv');
+    
+    if (temasDiv) temasDiv.style.display = estado === 'dictada' ? 'block' : 'none';
+    if (motivoDiv) motivoDiv.style.display = estado === 'cancelada_profesora' ? 'block' : 'none';
+    if (participantesDiv) participantesDiv.style.display = estado === 'dictada' ? 'block' : 'none';
+}
+
+async function cargarAsistenciasParaEditar(cursoId, claseId) {
+    const { data: participantes } = await supabase
+        .from('cursos_participantes')
+        .select('participante_id, participantes(nombre)')
+        .eq('curso_id', cursoId)
+        .eq('activo', true);
+    
+    const { data: asistencias } = await supabase
+        .from('asistencias')
+        .select('*')
+        .eq('clase_id', claseId);
+    
+    const asistMap = {};
+    if (asistencias) asistencias.forEach(a => { asistMap[a.participante_id] = a.estado_asistencia; });
+    
+    const container = document.getElementById('editClaseParticipantes');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (!participantes || participantes.length === 0) {
+        container.innerHTML = '<p style="color:#999;">Sin participantes asignados</p>';
+        return;
+    }
+    
+    participantes.forEach(p => {
+        const estadoPrevio = asistMap[p.participante_id] || 'presente';
+        const div = document.createElement('div');
+        div.className = 'participante-asistencia';
+        div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:0.5rem 0; border-bottom:1px solid #eee;';
+        div.innerHTML = `
+            <span style="font-weight:500;">${p.participantes.nombre}</span>
+            <div style="display:flex; gap:1rem;">
+                <label style="cursor:pointer;"><input type="radio" name="edit_asist_${p.participante_id}" value="presente" ${estadoPrevio === 'presente' ? 'checked' : ''}> ✅</label>
+                <label style="cursor:pointer;"><input type="radio" name="edit_asist_${p.participante_id}" value="ausente_con_aviso" ${estadoPrevio === 'ausente_con_aviso' ? 'checked' : ''}> ⚠️</label>
+                <label style="cursor:pointer;"><input type="radio" name="edit_asist_${p.participante_id}" value="ausente_sin_aviso" ${estadoPrevio === 'ausente_sin_aviso' ? 'checked' : ''}> ❌</label>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+async function guardarEdicionClase() {
+    const claseId = document.getElementById('editClaseId').value;
+    const fecha = document.getElementById('editClaseFecha').value;
+    const hora = document.getElementById('editClaseHora').value;
+    const estado = document.getElementById('editClaseEstado').value;
+    const temas = document.getElementById('editClaseTemas').value;
+    const motivo = document.getElementById('editClaseMotivo').value;
+    const esRecup = document.getElementById('editClaseEsRecup').checked;
+    
+    if (!fecha || !hora || !estado) {
+        showModalAlert('editClaseAlert', 'Por favor completá todos los campos', 'error');
+        return;
+    }
+    
+    if (estado === 'dictada' && !temas) {
+        showModalAlert('editClaseAlert', 'Por favor ingresá los temas tratados', 'error');
+        return;
+    }
+    
+    // Actualizar clase
+    const { error } = await supabase
+        .from('clases')
+        .update({
+            fecha, hora_inicio: hora, estado,
+            temas_tratados: estado === 'dictada' ? temas : null,
+            motivo_cancelacion: estado === 'cancelada_profesora' ? motivo : null,
+            es_recuperacion: esRecup
+        })
+        .eq('id', claseId);
+    
+    if (error) {
+        showModalAlert('editClaseAlert', 'Error: ' + error.message, 'error');
+        return;
+    }
+    
+    // Actualizar asistencias si fue dictada
+    if (estado === 'dictada') {
+        const radios = document.querySelectorAll('#editClaseParticipantes input[type="radio"]:checked');
+        for (const radio of radios) {
+            const participanteId = radio.name.replace('edit_asist_', '');
+            await supabase
+                .from('asistencias')
+                .update({ estado_asistencia: radio.value, presente: radio.value === 'presente' })
+                .eq('clase_id', claseId)
+                .eq('participante_id', participanteId);
+        }
+    }
+    
+    closeModal('editClaseModal');
+    await cargarMisClases();
+}
+
+// ==================== DETALLE DE ASISTENCIAS (ADMIN) ====================
+
+async function showDetalleAsistencias() {
+    showScreen('detalleAsistenciasScreen');
+    await cargarFiltrosDetalle();
+}
+
+async function cargarFiltrosDetalle() {
+    // Clientes
+    const { data: clientes } = await supabase.from('clientes').select('*').eq('activo', true).order('nombre');
+    const selCliente = document.getElementById('filtroDetalleCliente');
+    selCliente.innerHTML = '<option value="">Todos los clientes</option>';
+    clientes && clientes.forEach(c => selCliente.innerHTML += `<option value="${c.id}">${c.nombre}</option>`);
+    
+    // Profesoras
+    const { data: profesoras } = await supabase.from('profesoras').select('*').eq('activo', true).order('nombre');
+    const selProfesora = document.getElementById('filtroDetalleProfesora');
+    selProfesora.innerHTML = '<option value="">Todas las profesoras</option>';
+    profesoras && profesoras.forEach(p => selProfesora.innerHTML += `<option value="${p.id}">${p.nombre}</option>`);
+    
+    // Cursos
+    const { data: cursos } = await supabase.from('cursos').select('id, codigo_curso').eq('activo', true).order('codigo_curso');
+    const selCurso = document.getElementById('filtroDetalleCurso');
+    selCurso.innerHTML = '<option value="">Todos los cursos</option>';
+    cursos && cursos.forEach(c => selCurso.innerHTML += `<option value="${c.id}">${c.codigo_curso}</option>`);
+    
+    // Participantes
+    const { data: participantes } = await supabase.from('participantes').select('id, nombre').eq('activo', true).order('nombre');
+    const selParticipante = document.getElementById('filtroDetalleParticipante');
+    selParticipante.innerHTML = '<option value="">Todos los participantes</option>';
+    participantes && participantes.forEach(p => selParticipante.innerHTML += `<option value="${p.id}">${p.nombre}</option>`);
+}
+
+async function ejecutarFiltroDetalle() {
+    const clienteId = document.getElementById('filtroDetalleCliente').value;
+    const profesoraId = document.getElementById('filtroDetalleProfesora').value;
+    const cursoId = document.getElementById('filtroDetalleCurso').value;
+    const participanteId = document.getElementById('filtroDetalleParticipante').value;
+    const fechaDesde = document.getElementById('filtroDetalleFechaDesde').value;
+    const fechaHasta = document.getElementById('filtroDetalleFechaHasta').value;
+    
+    // Paso 1: Obtener IDs de clases que cumplen los filtros de fecha/profesora/curso/cliente
+    let queryClases = supabase
+        .from('clases')
+        .select('id, fecha, hora_inicio, estado, curso_id, profesora_id, cursos(codigo_curso, cliente_id, clientes(nombre)), profesoras(nombre)')
+        .order('fecha', { ascending: false });
+    
+    if (profesoraId) queryClases = queryClases.eq('profesora_id', profesoraId);
+    if (cursoId) queryClases = queryClases.eq('curso_id', cursoId);
+    if (fechaDesde) queryClases = queryClases.gte('fecha', fechaDesde);
+    if (fechaHasta) queryClases = queryClases.lte('fecha', fechaHasta);
+    
+    const { data: clases, error: errorClases } = await queryClases;
+    
+    if (errorClases) { alert('Error: ' + errorClases.message); return; }
+    if (!clases || clases.length === 0) {
+        mostrarResultadosDetalle([], 0);
+        return;
+    }
+    
+    // Filtrar por cliente si corresponde
+    let clasesFiltradas = clases;
+    if (clienteId) {
+        clasesFiltradas = clases.filter(c => c.cursos?.cliente_id === clienteId);
+    }
+    
+    if (clasesFiltradas.length === 0) {
+        mostrarResultadosDetalle([], 0);
+        return;
+    }
+    
+    const clasesIds = clasesFiltradas.map(c => c.id);
+    
+    // Paso 2: Obtener asistencias de esas clases
+    let queryAsist = supabase
+        .from('asistencias')
+        .select('*, participantes(id, nombre)')
+        .in('clase_id', clasesIds);
+    
+    if (participanteId) queryAsist = queryAsist.eq('participante_id', participanteId);
+    
+    const { data: asistencias, error: errorAsist } = await queryAsist;
+    
+    if (errorAsist) { alert('Error: ' + errorAsist.message); return; }
+    
+    // Combinar datos
+    const claseMap = {};
+    clasesFiltradas.forEach(c => { claseMap[c.id] = c; });
+    
+    const resultados = (asistencias || []).map(a => ({
+        ...a,
+        clase: claseMap[a.clase_id]
+    })).filter(a => a.clase);
+    
+    mostrarResultadosDetalle(resultados, resultados.length);
+}
+
+function mostrarResultadosDetalle(resultados, total) {
+    const tbody = document.querySelector('#detalleAsistenciasTable tbody');
+    document.getElementById('detalleCount').textContent = `${total} registros encontrados`;
+    tbody.innerHTML = '';
+    
+    if (resultados.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No se encontraron registros</td></tr>';
+        return;
+    }
+    
+    const estadosLabel = {
+        'presente': '✅ Presente',
+        'ausente_con_aviso': '⚠️ Ausente c/aviso',
+        'ausente_sin_aviso': '❌ Ausente s/aviso'
+    };
+    
+    resultados.forEach(a => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${a.clase.fecha}</td>
+            <td>${a.clase.cursos?.clientes?.nombre || '-'}</td>
+            <td>${a.clase.cursos?.codigo_curso || '-'}</td>
+            <td>${a.clase.profesoras?.nombre || '-'}</td>
+            <td>${a.participantes?.nombre || '-'}</td>
+            <td>${estadosLabel[a.estado_asistencia] || a.estado_asistencia}</td>
+            <td>${a.clase.hora_inicio || '-'}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// ==================== FILTRO PARTICIPANTES POR CLIENTE ====================
+
+async function filtrarParticipantesPorCliente() {
+    const clienteId = document.getElementById('filtroParticipantesCliente').value;
+    
+    let query = supabase
+        .from('participantes')
+        .select('*, clientes(nombre)')
+        .order('nombre');
+    
+    if (clienteId) query = query.eq('cliente_id', clienteId);
+    
+    const { data } = await query;
+    const tbody = document.querySelector('#participantesTable tbody');
+    tbody.innerHTML = '';
+    
+    if (data && data.length > 0) {
+        data.forEach(participante => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${participante.nombre}</td>
+                <td>${participante.clientes ? participante.clientes.nombre : '-'}</td>
+                <td>${participante.email || '-'}</td>
+                <td>${participante.telefono || '-'}</td>
+                <td><span class="badge ${participante.activo ? 'badge-success' : 'badge-danger'}">${participante.activo ? 'Activo' : 'Inactivo'}</span></td>
+                <td class="action-buttons">
+                    <button class="btn btn-warning btn-small" onclick="editParticipante('${participante.id}')">Editar</button>
+                    <button class="btn btn-danger btn-small" onclick="deleteParticipante('${participante.id}', '${participante.nombre.replace(/'/g, "\\'")}')">Eliminar</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } else {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No hay participantes</td></tr>';
+    }
+}
+
+window.showMisClases = showMisClases;
+window.cargarMisClases = cargarMisClases;
+window.abrirModalEditarClase = abrirModalEditarClase;
+window.toggleEditClaseCampos = toggleEditClaseCampos;
+window.guardarEdicionClase = guardarEdicionClase;
+window.showDetalleAsistencias = showDetalleAsistencias;
+window.ejecutarFiltroDetalle = ejecutarFiltroDetalle;
+window.filtrarParticipantesPorCliente = filtrarParticipantesPorCliente;
+
+window.deleteCliente = deleteCliente;
     const filtroMes = document.getElementById('misClasesMes') ? document.getElementById('misClasesMes').value : '';
     const filtroCurso = document.getElementById('misClasesCurso') ? document.getElementById('misClasesCurso').value : '';
     

@@ -548,11 +548,15 @@
                 </div>
                 <div class="form-group" style="flex:1; min-width: 140px;">
                     <label>Curso</label>
-                    <input type="text" id="filtroDetalleCurso" placeholder="Ej: PM-I-B1">
+                    <select id="filtroDetalleCurso">
+                        <option value="">Todos</option>
+                    </select>
                 </div>
                 <div class="form-group" style="flex:1; min-width: 140px;">
                     <label>Participante</label>
-                    <input type="text" id="filtroDetalleParticipante" placeholder="Nombre">
+                    <select id="filtroDetalleParticipante">
+                        <option value="">Todos</option>
+                    </select>
                 </div>
                 <div class="form-group" style="flex:1; min-width: 140px;">
                     <label>Desde</label>
@@ -954,6 +958,54 @@
                 <button class="btn btn-secondary" onclick="closeModal('bloqueoModal')">Cancelar</button>
             </div>
             <div id="bloqueoModalAlert" class="hidden"></div>
+        </div>
+    </div>
+
+    <!-- Modal Editar Clase (Mis Clases) -->
+    <div id="editClaseModal" class="modal">
+        <div class="modal-content">
+            <h3 id="editClaseTitulo" style="color: var(--primary); margin-bottom: 1rem;">Editar Clase</h3>
+            <input type="hidden" id="editClaseId">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Fecha *</label>
+                    <input type="date" id="editClaseFecha">
+                </div>
+                <div class="form-group">
+                    <label>Hora *</label>
+                    <input type="time" id="editClaseHora">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Estado *</label>
+                <select id="editClaseEstado" onchange="toggleEditClaseCampos(this.value)">
+                    <option value="dictada">✅ Dictada</option>
+                    <option value="cancelada_profesora">🔴 Cancelada por Profesora</option>
+                    <option value="cancelada_empresa">🏢 Cancelada por Empresa</option>
+                    <option value="suspendida">⚪ Suspendida</option>
+                    <option value="feriado">❄️ Feriado</option>
+                </select>
+            </div>
+            <div id="editClaseTemasDiv" class="form-group">
+                <label>Temas tratados *</label>
+                <textarea id="editClaseTemas" rows="3" placeholder="Describí los temas de la clase..."></textarea>
+            </div>
+            <div id="editClaseMotivoDiv" class="form-group" style="display:none;">
+                <label>Motivo de cancelación *</label>
+                <input type="text" id="editClaseMotivo" placeholder="Motivo">
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" id="editClaseEsRecup"> Es recuperación</label>
+            </div>
+            <div id="editClaseParticipantesDiv" class="form-group">
+                <label style="font-weight:600; margin-bottom:0.5rem; display:block;">Asistencia (✅ Presente | ⚠️ Con aviso | ❌ Sin aviso)</label>
+                <div id="editClaseParticipantes"></div>
+            </div>
+            <div id="editClaseAlert" class="hidden" style="margin: 0.5rem 0;"></div>
+            <div class="action-buttons" style="margin-top: 1rem;">
+                <button class="btn btn-success" onclick="guardarEdicionClase()">💾 Guardar Cambios</button>
+                <button class="btn btn-secondary" onclick="closeModal('editClaseModal')">Cancelar</button>
+            </div>
         </div>
     </div>
 
