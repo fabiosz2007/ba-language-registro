@@ -305,6 +305,10 @@
                     <div class="menu-card-icon">📝</div>
                     <h3>Registrar Asistencia</h3>
                 </div>
+                <div class="menu-card" onclick="showMisClases()">
+                    <div class="menu-card-icon">📋</div>
+                    <h3>Mis Clases</h3>
+                </div>
                 <div class="menu-card" onclick="showAgenda()">
                     <div class="menu-card-icon">📅</div>
                     <h3>Mi Agenda</h3>
@@ -483,9 +487,89 @@
                 <h2 style="color: var(--primary);">Participantes</h2>
                 <button class="btn btn-primary" onclick="showParticipanteModal()">+ Nuevo Participante</button>
             </div>
+            <!-- MEJORA 5: Filtro por cliente -->
+            <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;">
+                <select id="filtroParticipantesCliente" onchange="filtrarParticipantesPorCliente()" style="flex:1; padding: 0.5rem; border-radius: 5px; border: 1px solid #ddd;">
+                    <option value="">Todos los clientes</option>
+                </select>
+            </div>
             <div class="table-container">
                 <table id="participantesTable">
                     <thead><tr><th>Nombre</th><th>Cliente</th><th>Email</th><th>Teléfono</th><th>Estado</th><th>Acciones</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- MEJORA 2: Mis Clases (Profesora) -->
+    <div id="misClasesScreen" class="container hidden">
+        <div class="card">
+            <button class="btn btn-secondary" onclick="backToMenu()">← Volver</button>
+            <h2 style="color: var(--primary); margin: 1rem 0;">Mis Clases</h2>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                <div class="form-group" style="flex:1; min-width: 180px;">
+                    <label>Mes</label>
+                    <input type="month" id="misClasesMes" onchange="cargarMisClases()">
+                </div>
+                <div class="form-group" style="flex:2; min-width: 200px;">
+                    <label>Curso</label>
+                    <select id="misClasesCurso" onchange="cargarMisClases()">
+                        <option value="">Todos los cursos</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-container">
+                <table id="misClasesTable">
+                    <thead><tr><th>Fecha</th><th>Curso</th><th>Cliente</th><th>Estado</th><th>Temas</th><th>Acción</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- MEJORA 3: Detalle Asistencias (Admin) -->
+    <div id="detalleAsistenciasScreen" class="container hidden">
+        <div class="card">
+            <button class="btn btn-secondary" onclick="backToMenu()">← Volver</button>
+            <h2 style="color: var(--primary); margin: 1rem 0;">Detalle de Asistencias</h2>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                <div class="form-group" style="flex:1; min-width: 160px;">
+                    <label>Cliente</label>
+                    <select id="filtroDetalleCliente">
+                        <option value="">Todos</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1; min-width: 160px;">
+                    <label>Profesora</label>
+                    <select id="filtroDetalleProfesora">
+                        <option value="">Todas</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1; min-width: 140px;">
+                    <label>Curso</label>
+                    <input type="text" id="filtroDetalleCurso" placeholder="Ej: PM-I-B1">
+                </div>
+                <div class="form-group" style="flex:1; min-width: 140px;">
+                    <label>Participante</label>
+                    <input type="text" id="filtroDetalleParticipante" placeholder="Nombre">
+                </div>
+                <div class="form-group" style="flex:1; min-width: 140px;">
+                    <label>Desde</label>
+                    <input type="date" id="filtroDetalleFechaDesde">
+                </div>
+                <div class="form-group" style="flex:1; min-width: 140px;">
+                    <label>Hasta</label>
+                    <input type="date" id="filtroDetalleFechaHasta">
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <button class="btn btn-primary" onclick="ejecutarFiltroDetalle()">🔍 Buscar</button>
+                <span id="detalleCount" style="color: #666;"></span>
+            </div>
+            <div class="table-container">
+                <table id="detalleAsistenciasTable">
+                    <thead><tr><th>Fecha</th><th>Cliente</th><th>Curso</th><th>Profesora</th><th>Participante</th><th>Asistencia</th><th>Hora</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
@@ -509,6 +593,10 @@
                 <div class="menu-card" id="facturacionMenu" onclick="showReporteFacturacionScreen()" style="display: none;">
                     <div class="menu-card-icon">💰</div>
                     <h3>Resumen de Facturación</h3>
+                </div>
+                <div class="menu-card" id="detalleAsistenciasMenu" onclick="showDetalleAsistencias()" style="display: none;">
+                    <div class="menu-card-icon">🔍</div>
+                    <h3>Detalle de Asistencias</h3>
                 </div>
             </div>
         </div>

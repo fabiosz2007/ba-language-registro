@@ -368,6 +368,19 @@ async function guardarAsistencia() {
         return;
     }
     
+    // VALIDAR CLASE DUPLICADA: mismo curso + misma fecha
+    const { data: claseExistente } = await supabase
+        .from('clases')
+        .select('id, fecha, estado')
+        .eq('curso_id', cursoId)
+        .eq('fecha', fecha)
+        .maybeSingle();
+    
+    if (claseExistente) {
+        showAlert('asistenciaAlert', `⚠️ Ya existe una clase registrada para este curso el ${fecha}. Si necesitás corregirla, usá la opción "Mis Clases".`, 'error');
+        return;
+    }
+    
     const { data: claseData, error: claseError } = await supabase
         .from('clases')
         .insert({
@@ -1010,7 +1023,8 @@ function verificarSolapamientoInterno(horarios) {
                 continue;
             }
             
-            // Verificar solapamiento
+            // Solapamiento real: uno empieza ANTES de que termine el otro
+            // fin1 === inicio2 NO es solapamiento (clases consecutivas)
             if (h1.hora_inicio < h2.hora_fin && h1.hora_fin > h2.hora_inicio) {
                 return {
                     dia: diasNombre[h1.dia_semana],
@@ -1065,9 +1079,7 @@ async function verificarSolapamientoHorarios(profesoraId, nuevosHorarios, cursoI
                 continue;
             }
             
-            // Verificar solapamiento de horarios
-            // Dos horarios se solapan si:
-            // nuevo.inicio < existente.fin Y nuevo.fin > existente.inicio
+            // Solapamiento real: fin1 === inicio2 es consecutivo, NO solapamiento
             if (nuevoHorario.hora_inicio < existente.hora_fin && 
                 nuevoHorario.hora_fin > existente.hora_inicio) {
                 
@@ -1396,6 +1408,17 @@ async function deleteProfesora(id, nombre) {
 // ==================== PARTICIPANTES ====================
 async function showParticipantesPanel() {
     showScreen('participantesPanel');
+    
+    // Cargar clientes en filtro
+    const { data: clientes } = await supabase.from('clientes').select('*').eq('activo', true).order('nombre');
+    const filtro = document.getElementById('filtroParticipantesCliente');
+    if (filtro) {
+        filtro.innerHTML = '<option value="">Todos los clientes</option>';
+        clientes && clientes.forEach(c => {
+            filtro.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
+        });
+    }
+    
     await loadParticipantesAdmin();
 }
 
@@ -1595,14 +1618,14 @@ async function deleteParticipante(id, nombre) {
 function showReportes() {
     showScreen('reportesPanel');
     
-    // Mostrar reporte de facturación solo si es admin
+    // Mostrar opciones solo para admin
     const facturacionMenu = document.getElementById('facturacionMenu');
+    const detalleMenu = document.getElementById('detalleAsistenciasMenu');
     if (facturacionMenu) {
-        if (isAdmin) {
-            facturacionMenu.style.display = 'flex';
-        } else {
-            facturacionMenu.style.display = 'none';
-        }
+        facturacionMenu.style.display = isAdmin ? 'flex' : 'none';
+    }
+    if (detalleMenu) {
+        detalleMenu.style.display = isAdmin ? 'flex' : 'none';
     }
 }
 
@@ -3527,7 +3550,8 @@ async function guardarBloqueo() {
     
     if (existentes) {
         const solapa = existentes.some(b => {
-            return !(horaHasta <= b.hora_inicio || horaDesde >= b.hora_fin);
+            // Consecutivos (fin === inicio) no es solapamiento
+            return horaHasta > b.hora_inicio && horaDesde < b.hora_fin;
         });
         
         if (solapa) {
@@ -3921,6 +3945,284 @@ window.showClientesPanel = showClientesPanel;
 window.showClienteModal = showClienteModal;
 window.saveCliente = saveCliente;
 window.editCliente = editCliente;
+// ==================== MIS CLASES (PROFESORA) ====================
+
+async function showMisClases() {
+    showScreen('misClasesScreen');
+    await cargarMisClases();
+}
+
+async function cargarMisClases() {
+    const filtroMes = document.getElementById('misClasesMes') ? document.getElementById('misClasesMes').value : '';
+    const filtroCurso = document.getElementById('misClasesCurso') ? document.getElementById('misClasesCurso').value : '';
+    
+    let query = supabase
+        .from('clases')
+        .select(`
+            *,
+            cursos (codigo_curso, clientes(nombre))
+        `)
+        .eq('profesora_id', currentUser.id)
+        .order('fecha', { ascending: false });
+    
+    if (filtroMes) {
+        const [anio, mes] = filtroMes.split('-');
+        const desde = `${anio}-${mes}-01`;
+        const hasta = `${anio}-${mes}-31`;
+        query = query.gte('fecha', desde).lte('fecha', hasta);
+    }
+    
+    if (filtroCurso) {
+        query = query.eq('curso_id', filtroCurso);
+    }
+    
+    const { data: clases, error } = await query;
+    
+    const tbody = document.querySelector('#misClasesTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    
+    if (!clases || clases.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No se encontraron clases</td></tr>';
+        return;
+    }
+    
+    const estadosLabel = {
+        'dictada': '✅ Dictada',
+        'cancelada_profesora': '🔴 Cancel. Profesora',
+        'cancelada_empresa': '🏢 Cancel. Empresa',
+        'suspendida': '⚪ Suspendida',
+        'feriado': '❄️ Feriado'
+    };
+    
+    clases.forEach(clase => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${clase.fecha}</td>
+            <td>${clase.cursos ? clase.cursos.codigo_curso : '-'}</td>
+            <td>${clase.cursos && clase.cursos.clientes ? clase.cursos.clientes.nombre : '-'}</td>
+            <td>${estadosLabel[clase.estado] || clase.estado}</td>
+            <td>${clase.temas_tratados ? clase.temas_tratados.substring(0, 40) + (clase.temas_tratados.length > 40 ? '...' : '') : '-'}</td>
+            <td>
+                <button class="btn btn-warning btn-small" onclick="editarMiClase('${clase.id}')">Editar</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+async function editarMiClase(claseId) {
+    const { data: clase } = await supabase
+        .from('clases')
+        .select('*, cursos(codigo_curso, clientes(nombre))')
+        .eq('id', claseId)
+        .single();
+    
+    if (!clase) return;
+    
+    // Cargar datos en el formulario de registro
+    await showRegistroAsistencia();
+    
+    document.getElementById('cursoSelect').value = clase.curso_id;
+    document.getElementById('fechaClase').value = clase.fecha;
+    document.getElementById('horaClase').value = clase.hora_inicio;
+    document.getElementById('estadoClase').value = clase.estado;
+    document.getElementById('temasTratados').value = clase.temas_tratados || '';
+    document.getElementById('esRecuperacion').checked = clase.es_recuperacion;
+    
+    // Guardar el ID de la clase que estamos editando
+    document.getElementById('guardarBtn').setAttribute('data-edit-clase-id', claseId);
+    document.getElementById('guardarBtn').textContent = 'Actualizar Clase';
+    
+    // Mostrar mensaje de contexto
+    showAlert('asistenciaAlert', `Editando clase del ${clase.fecha} - ${clase.cursos.codigo_curso}`, 'info');
+    
+    await cargarParticipantesConAsistencia(clase.curso_id, claseId);
+}
+
+async function cargarParticipantesConAsistencia(cursoId, claseId) {
+    // Cargar participantes con su asistencia previa
+    const { data: participantes } = await supabase
+        .from('cursos_participantes')
+        .select('participante_id, participantes(id, nombre)')
+        .eq('curso_id', cursoId)
+        .eq('activo', true);
+    
+    const { data: asistencias } = await supabase
+        .from('asistencias')
+        .select('*')
+        .eq('clase_id', claseId);
+    
+    const asistMap = {};
+    if (asistencias) {
+        asistencias.forEach(a => { asistMap[a.participante_id] = a.estado_asistencia; });
+    }
+    
+    const container = document.getElementById('participantesList');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (participantes) {
+        participantes.forEach(p => {
+            const estadoPrevio = asistMap[p.participante_id] || 'presente';
+            const div = document.createElement('div');
+            div.className = 'participante-asistencia';
+            div.innerHTML = `
+                <span>${p.participantes.nombre}</span>
+                <div class="radio-group">
+                    <label><input type="radio" name="asist_${p.participante_id}" value="presente" ${estadoPrevio === 'presente' ? 'checked' : ''}> ✅ Presente</label>
+                    <label><input type="radio" name="asist_${p.participante_id}" value="ausente_con_aviso" ${estadoPrevio === 'ausente_con_aviso' ? 'checked' : ''}> ⚠️ Ausente c/aviso</label>
+                    <label><input type="radio" name="asist_${p.participante_id}" value="ausente_sin_aviso" ${estadoPrevio === 'ausente_sin_aviso' ? 'checked' : ''}> ❌ Ausente s/aviso</label>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+}
+
+// ==================== DETALLE DE ASISTENCIAS (ADMIN) ====================
+
+async function showDetalleAsistencias() {
+    showScreen('detalleAsistenciasScreen');
+    await cargarFiltrosDetalle();
+}
+
+async function cargarFiltrosDetalle() {
+    // Cargar clientes
+    const { data: clientes } = await supabase.from('clientes').select('*').eq('activo', true).order('nombre');
+    const selCliente = document.getElementById('filtroDetalleCliente');
+    selCliente.innerHTML = '<option value="">Todos los clientes</option>';
+    clientes && clientes.forEach(c => selCliente.innerHTML += `<option value="${c.id}">${c.nombre}</option>`);
+    
+    // Cargar profesoras
+    const { data: profesoras } = await supabase.from('profesoras').select('*').eq('activo', true).order('nombre');
+    const selProfesora = document.getElementById('filtroDetalleProfesora');
+    selProfesora.innerHTML = '<option value="">Todas las profesoras</option>';
+    profesoras && profesoras.forEach(p => selProfesora.innerHTML += `<option value="${p.id}">${p.nombre}</option>`);
+}
+
+async function ejecutarFiltroDetalle() {
+    const clienteId = document.getElementById('filtroDetalleCliente').value;
+    const profesoraId = document.getElementById('filtroDetalleProfesora').value;
+    const cursoTexto = document.getElementById('filtroDetalleCurso').value.toLowerCase();
+    const participanteTexto = document.getElementById('filtroDetalleParticipante').value.toLowerCase();
+    const fechaDesde = document.getElementById('filtroDetalleFechaDesde').value;
+    const fechaHasta = document.getElementById('filtroDetalleFechaHasta').value;
+    
+    let query = supabase
+        .from('asistencias')
+        .select(`
+            *,
+            clases (fecha, estado, hora_inicio,
+                cursos (codigo_curso, clientes(nombre)),
+                profesoras (nombre)
+            ),
+            participantes (nombre)
+        `)
+        .order('clase_id');
+    
+    if (profesoraId) {
+        query = query.eq('clases.profesoras.id', profesoraId);
+    }
+    if (fechaDesde) query = query.gte('clases.fecha', fechaDesde);
+    if (fechaHasta) query = query.lte('clases.fecha', fechaHasta);
+    
+    const { data, error } = await query;
+    
+    // Filtrar en cliente, también por curso y participante (filtros locales)
+    let resultados = data || [];
+    
+    if (clienteId) {
+        resultados = resultados.filter(a => a.clases?.cursos?.clientes?.id === clienteId || 
+            (a.clases?.cursos?.clientes && Object.values(a.clases.cursos.clientes).includes(clienteId)));
+    }
+    if (cursoTexto) {
+        resultados = resultados.filter(a => a.clases?.cursos?.codigo_curso?.toLowerCase().includes(cursoTexto));
+    }
+    if (participanteTexto) {
+        resultados = resultados.filter(a => a.participantes?.nombre?.toLowerCase().includes(participanteTexto));
+    }
+    
+    // Filtrar registros con clases válidas
+    resultados = resultados.filter(a => a.clases && a.clases.fecha);
+    
+    const tbody = document.querySelector('#detalleAsistenciasTable tbody');
+    tbody.innerHTML = '';
+    
+    if (resultados.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No se encontraron registros</td></tr>';
+        return;
+    }
+    
+    const estadosLabel = {
+        'presente': '✅ Presente',
+        'ausente_con_aviso': '⚠️ Ausente c/aviso',
+        'ausente_sin_aviso': '❌ Ausente s/aviso'
+    };
+    
+    resultados.forEach(a => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${a.clases.fecha}</td>
+            <td>${a.clases?.cursos?.clientes?.nombre || '-'}</td>
+            <td>${a.clases?.cursos?.codigo_curso || '-'}</td>
+            <td>${a.clases?.profesoras?.nombre || '-'}</td>
+            <td>${a.participantes?.nombre || '-'}</td>
+            <td>${estadosLabel[a.estado_asistencia] || a.estado_asistencia}</td>
+            <td>${a.clases.hora_inicio || '-'}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+    
+    document.getElementById('detalleCount').textContent = `${resultados.length} registros encontrados`;
+}
+
+// ==================== FILTRO PARTICIPANTES POR CLIENTE ====================
+
+async function filtrarParticipantesPorCliente() {
+    const clienteId = document.getElementById('filtroParticipantesCliente').value;
+    
+    let query = supabase
+        .from('participantes')
+        .select('*, clientes(nombre)')
+        .order('nombre');
+    
+    if (clienteId) {
+        query = query.eq('cliente_id', clienteId);
+    }
+    
+    const { data } = await query;
+    const tbody = document.querySelector('#participantesTable tbody');
+    tbody.innerHTML = '';
+    
+    if (data && data.length > 0) {
+        data.forEach(participante => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${participante.nombre}</td>
+                <td>${participante.clientes ? participante.clientes.nombre : '-'}</td>
+                <td>${participante.email || '-'}</td>
+                <td>${participante.telefono || '-'}</td>
+                <td><span class="badge ${participante.activo ? 'badge-success' : 'badge-danger'}">${participante.activo ? 'Activo' : 'Inactivo'}</span></td>
+                <td class="action-buttons">
+                    <button class="btn btn-warning btn-small" onclick="editParticipante('${participante.id}')">Editar</button>
+                    <button class="btn btn-danger btn-small" onclick="deleteParticipante('${participante.id}', '${participante.nombre}')">Eliminar</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } else {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No hay participantes</td></tr>';
+    }
+}
+
+window.showMisClases = showMisClases;
+window.cargarMisClases = cargarMisClases;
+window.editarMiClase = editarMiClase;
+window.showDetalleAsistencias = showDetalleAsistencias;
+window.ejecutarFiltroDetalle = ejecutarFiltroDetalle;
+window.filtrarParticipantesPorCliente = filtrarParticipantesPorCliente;
+
 window.deleteCliente = deleteCliente;
 window.openModal = openModal;
 window.closeModal = closeModal;
