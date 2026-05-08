@@ -4011,7 +4011,10 @@ async function cargarMisClases() {
             <td>${clase.cursos?.clientes ? clase.cursos.clientes.nombre : '-'}</td>
             <td>${estadosLabel[clase.estado] || clase.estado}</td>
             <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${clase.temas_tratados || ''}">${clase.temas_tratados ? clase.temas_tratados.substring(0, 40) + (clase.temas_tratados.length > 40 ? '...' : '') : '-'}</td>
-            <td><button class="btn btn-warning btn-small" onclick="abrirModalEditarClase('${clase.id}')">Editar</button></td>
+            <td>
+                <button class="btn btn-warning btn-small" onclick="abrirModalEditarClase('${clase.id}')">Editar</button>
+                <button class="btn btn-danger btn-small" onclick="eliminarMiClase('${clase.id}', '${clase.fecha}')">Eliminar</button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
@@ -4172,17 +4175,65 @@ async function cargarFiltrosDetalle() {
     selProfesora.innerHTML = '<option value="">Todas las profesoras</option>';
     profesoras && profesoras.forEach(p => selProfesora.innerHTML += `<option value="${p.id}">${p.nombre}</option>`);
     
-    // Cursos
-    const { data: cursos } = await supabase.from('cursos').select('id, codigo_curso').eq('activo', true).order('codigo_curso');
-    const selCurso = document.getElementById('filtroDetalleCurso');
-    selCurso.innerHTML = '<option value="">Todos los cursos</option>';
-    cursos && cursos.forEach(c => selCurso.innerHTML += `<option value="${c.id}">${c.codigo_curso}</option>`);
+    // Cursos y participantes (todos al inicio)
+    await actualizarCursosFiltro();
+    await actualizarParticipantesFiltro();
+}
+
+async function actualizarCursosFiltro() {
+    const clienteId = document.getElementById('filtroDetalleCliente').value;
+    const profesoraId = document.getElementById('filtroDetalleProfesora').value;
     
-    // Participantes
-    const { data: participantes } = await supabase.from('participantes').select('id, nombre').eq('activo', true).order('nombre');
-    const selParticipante = document.getElementById('filtroDetalleParticipante');
-    selParticipante.innerHTML = '<option value="">Todos los participantes</option>';
-    participantes && participantes.forEach(p => selParticipante.innerHTML += `<option value="${p.id}">${p.nombre}</option>`);
+    let query = supabase.from('cursos').select('id, codigo_curso, cliente_id').eq('activo', true).order('codigo_curso');
+    if (clienteId) query = query.eq('cliente_id', clienteId);
+    
+    // Si hay profesora, filtrar por cursos asignados a ella
+    if (profesoraId) {
+        const { data: asig } = await supabase
+            .from('cursos_profesoras')
+            .select('curso_id')
+            .eq('profesora_id', profesoraId)
+            .eq('activo', true);
+        if (asig && asig.length > 0) {
+            const ids = asig.map(a => a.curso_id);
+            query = query.in('id', ids);
+        }
+    }
+    
+    const { data: cursos } = await query;
+    const sel = document.getElementById('filtroDetalleCurso');
+    const valorActual = sel.value;
+    sel.innerHTML = '<option value="">Todos los cursos</option>';
+    cursos && cursos.forEach(c => sel.innerHTML += `<option value="${c.id}">${c.codigo_curso}</option>`);
+    if (valorActual) sel.value = valorActual;
+}
+
+async function actualizarParticipantesFiltro() {
+    const clienteId = document.getElementById('filtroDetalleCliente').value;
+    const cursoId = document.getElementById('filtroDetalleCurso').value;
+    
+    let query = supabase.from('participantes').select('id, nombre, cliente_id').eq('activo', true).order('nombre');
+    if (clienteId) query = query.eq('cliente_id', clienteId);
+    
+    // Si hay curso, filtrar participantes de ese curso
+    if (cursoId) {
+        const { data: part } = await supabase
+            .from('cursos_participantes')
+            .select('participante_id')
+            .eq('curso_id', cursoId)
+            .eq('activo', true);
+        if (part && part.length > 0) {
+            const ids = part.map(p => p.participante_id);
+            query = query.in('id', ids);
+        }
+    }
+    
+    const { data: participantes } = await query;
+    const sel = document.getElementById('filtroDetalleParticipante');
+    const valorActual = sel.value;
+    sel.innerHTML = '<option value="">Todos los participantes</option>';
+    participantes && participantes.forEach(p => sel.innerHTML += `<option value="${p.id}">${p.nombre}</option>`);
+    if (valorActual) sel.value = valorActual;
 }
 
 async function ejecutarFiltroDetalle() {
@@ -4193,10 +4244,11 @@ async function ejecutarFiltroDetalle() {
     const fechaDesde = document.getElementById('filtroDetalleFechaDesde').value;
     const fechaHasta = document.getElementById('filtroDetalleFechaHasta').value;
     
-    // Paso 1: Obtener IDs de clases que cumplen los filtros de fecha/profesora/curso/cliente
+    // Paso 1: Buscar clases con filtros
+    // Usamos profesora_id directamente para evitar el error de ambigüedad
     let queryClases = supabase
         .from('clases')
-        .select('id, fecha, hora_inicio, estado, curso_id, profesora_id, cursos(codigo_curso, cliente_id, clientes(nombre)), profesoras(nombre)')
+        .select('id, fecha, hora_inicio, estado, curso_id, profesora_id, cursos(id, codigo_curso, cliente_id, clientes(id, nombre))')
         .order('fecha', { ascending: false });
     
     if (profesoraId) queryClases = queryClases.eq('profesora_id', profesoraId);
@@ -4205,53 +4257,48 @@ async function ejecutarFiltroDetalle() {
     if (fechaHasta) queryClases = queryClases.lte('fecha', fechaHasta);
     
     const { data: clases, error: errorClases } = await queryClases;
+    if (errorClases) { alert('Error al buscar clases: ' + errorClases.message); return; }
     
-    if (errorClases) { alert('Error: ' + errorClases.message); return; }
-    if (!clases || clases.length === 0) {
-        mostrarResultadosDetalle([], 0);
-        return;
-    }
-    
-    // Filtrar por cliente si corresponde
-    let clasesFiltradas = clases;
+    let clasesFiltradas = clases || [];
     if (clienteId) {
-        clasesFiltradas = clases.filter(c => c.cursos?.cliente_id === clienteId);
+        clasesFiltradas = clasesFiltradas.filter(c => c.cursos?.cliente_id === clienteId);
     }
     
-    if (clasesFiltradas.length === 0) {
-        mostrarResultadosDetalle([], 0);
-        return;
+    if (clasesFiltradas.length === 0) { mostrarResultadosDetalle([], {}); return; }
+    
+    // Paso 2: Obtener nombres de profesoras por ID
+    const profesorasIds = [...new Set(clasesFiltradas.map(c => c.profesora_id).filter(Boolean))];
+    let profesorasMap = {};
+    if (profesorasIds.length > 0) {
+        const { data: profs } = await supabase.from('profesoras').select('id, nombre').in('id', profesorasIds);
+        profs && profs.forEach(p => { profesorasMap[p.id] = p.nombre; });
     }
     
+    // Paso 3: Obtener asistencias
     const clasesIds = clasesFiltradas.map(c => c.id);
-    
-    // Paso 2: Obtener asistencias de esas clases
     let queryAsist = supabase
         .from('asistencias')
         .select('*, participantes(id, nombre)')
         .in('clase_id', clasesIds);
-    
     if (participanteId) queryAsist = queryAsist.eq('participante_id', participanteId);
     
     const { data: asistencias, error: errorAsist } = await queryAsist;
+    if (errorAsist) { alert('Error al buscar asistencias: ' + errorAsist.message); return; }
     
-    if (errorAsist) { alert('Error: ' + errorAsist.message); return; }
-    
-    // Combinar datos
+    // Combinar
     const claseMap = {};
     clasesFiltradas.forEach(c => { claseMap[c.id] = c; });
     
-    const resultados = (asistencias || []).map(a => ({
-        ...a,
-        clase: claseMap[a.clase_id]
-    })).filter(a => a.clase);
+    const resultados = (asistencias || [])
+        .map(a => ({ ...a, clase: claseMap[a.clase_id] }))
+        .filter(a => a.clase);
     
-    mostrarResultadosDetalle(resultados, resultados.length);
+    mostrarResultadosDetalle(resultados, profesorasMap);
 }
 
-function mostrarResultadosDetalle(resultados, total) {
+function mostrarResultadosDetalle(resultados, profesorasMap) {
     const tbody = document.querySelector('#detalleAsistenciasTable tbody');
-    document.getElementById('detalleCount').textContent = `${total} registros encontrados`;
+    document.getElementById('detalleCount').textContent = `${resultados.length} registros encontrados`;
     tbody.innerHTML = '';
     
     if (resultados.length === 0) {
@@ -4271,7 +4318,7 @@ function mostrarResultadosDetalle(resultados, total) {
             <td>${a.clase.fecha}</td>
             <td>${a.clase.cursos?.clientes?.nombre || '-'}</td>
             <td>${a.clase.cursos?.codigo_curso || '-'}</td>
-            <td>${a.clase.profesoras?.nombre || '-'}</td>
+            <td>${profesorasMap[a.clase.profesora_id] || '-'}</td>
             <td>${a.participantes?.nombre || '-'}</td>
             <td>${estadosLabel[a.estado_asistencia] || a.estado_asistencia}</td>
             <td>${a.clase.hora_inicio || '-'}</td>
@@ -4317,13 +4364,33 @@ async function filtrarParticipantesPorCliente() {
     }
 }
 
+async function eliminarMiClase(claseId, fecha) {
+    if (!confirm(`¿Eliminás la clase del ${fecha}?\n\nSe eliminarán también los registros de asistencia. Luego podrás cargarla de nuevo.`)) return;
+    
+    // Eliminar asistencias primero
+    await supabase.from('asistencias').delete().eq('clase_id', claseId);
+    
+    // Eliminar la clase
+    const { error } = await supabase.from('clases').delete().eq('id', claseId);
+    
+    if (error) {
+        alert('Error al eliminar: ' + error.message);
+        return;
+    }
+    
+    await cargarMisClases();
+}
+
 window.showMisClases = showMisClases;
 window.cargarMisClases = cargarMisClases;
 window.abrirModalEditarClase = abrirModalEditarClase;
 window.toggleEditClaseCampos = toggleEditClaseCampos;
 window.guardarEdicionClase = guardarEdicionClase;
+window.eliminarMiClase = eliminarMiClase;
 window.showDetalleAsistencias = showDetalleAsistencias;
 window.ejecutarFiltroDetalle = ejecutarFiltroDetalle;
+window.actualizarCursosFiltro = actualizarCursosFiltro;
+window.actualizarParticipantesFiltro = actualizarParticipantesFiltro;
 window.filtrarParticipantesPorCliente = filtrarParticipantesPorCliente;
 
 window.deleteCliente = deleteCliente;

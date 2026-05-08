@@ -536,19 +536,19 @@
             <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
                 <div class="form-group" style="flex:1; min-width: 160px;">
                     <label>Cliente</label>
-                    <select id="filtroDetalleCliente">
+                    <select id="filtroDetalleCliente" onchange="actualizarCursosFiltro(); actualizarParticipantesFiltro();">
                         <option value="">Todos</option>
                     </select>
                 </div>
                 <div class="form-group" style="flex:1; min-width: 160px;">
                     <label>Profesora</label>
-                    <select id="filtroDetalleProfesora">
+                    <select id="filtroDetalleProfesora" onchange="actualizarCursosFiltro();">
                         <option value="">Todas</option>
                     </select>
                 </div>
                 <div class="form-group" style="flex:1; min-width: 140px;">
                     <label>Curso</label>
-                    <select id="filtroDetalleCurso">
+                    <select id="filtroDetalleCurso" onchange="actualizarParticipantesFiltro();">
                         <option value="">Todos</option>
                     </select>
                 </div>
