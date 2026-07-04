@@ -1783,7 +1783,11 @@ async function generarReporteCliente() {
             
             for (const clase of clases) {
                 let estadoHtml = '';
-                if (clase.estado === 'dictada') {
+                
+                // Si es recuperación, el estado es siempre "Recuperación" sin importar asistencia
+                if (clase.es_recuperacion) {
+                    estadoHtml = '<span class="badge badge-info">🔄 Recuperacion</span>';
+                } else if (clase.estado === 'dictada') {
                     estadoHtml = '<span class="badge badge-success">Dictada</span>';
                 } else if (clase.estado === 'cancelada_feriado') {
                     estadoHtml = '<span class="badge badge-warning">Feriado</span>';
@@ -1805,9 +1809,18 @@ async function generarReporteCliente() {
                         const ausentesConAviso = asistencias.filter(a => a.estado_asistencia === 'ausente_con_aviso').length;
                         const ausentesSinAviso = asistencias.filter(a => a.estado_asistencia === 'ausente_sin_aviso').length;
                         const total = asistencias.length;
-                        asistenciaHtml = `${presentes}/${total} presentes`;
-                        if (ausentesConAviso > 0 || ausentesSinAviso > 0) {
-                            asistenciaHtml += `<br><small>${ausentesConAviso} aus. c/aviso, ${ausentesSinAviso} aus. s/aviso</small>`;
+                        
+                        if (clase.es_recuperacion) {
+                            // En recuperaciones mostrar quién recuperó
+                            asistenciaHtml = `${presentes}/${total} recuperaron`;
+                            if (ausentesConAviso > 0) {
+                                asistenciaHtml += `<br><small>${ausentesConAviso} no recuperaron</small>`;
+                            }
+                        } else {
+                            asistenciaHtml = `${presentes}/${total} presentes`;
+                            if (ausentesConAviso > 0 || ausentesSinAviso > 0) {
+                                asistenciaHtml += `<br><small>${ausentesConAviso} aus. c/aviso, ${ausentesSinAviso} aus. s/aviso</small>`;
+                            }
                         }
                     }
                 }
@@ -2127,9 +2140,8 @@ async function generarReporteProfesora() {
                             <th>Curso</th>
                             <th>Cliente</th>
                             <th>Hora</th>
-                            <th>Duración</th>
+                            <th>Duracion</th>
                             <th>Estado</th>
-                            <th>Recuperación</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2137,7 +2149,11 @@ async function generarReporteProfesora() {
     
     clases.forEach(clase => {
         let estadoBadge = '';
-        if (clase.estado === 'dictada') {
+        
+        // Si es recuperación, el estado es siempre "Recuperación"
+        if (clase.es_recuperacion) {
+            estadoBadge = '<span class="badge badge-info">🔄 Recuperacion</span>';
+        } else if (clase.estado === 'dictada') {
             estadoBadge = '<span class="badge badge-success">Dictada</span>';
         } else if (clase.estado === 'cancelada_feriado') {
             estadoBadge = '<span class="badge badge-warning">Feriado</span>';
@@ -2166,7 +2182,6 @@ async function generarReporteProfesora() {
                 <td>${clase.hora_inicio}</td>
                 <td><strong>${clase.duracion_horas}h</strong></td>
                 <td>${estadoBadge}</td>
-                <td>${clase.es_recuperacion ? '<span class="badge badge-info">Sí</span>' : '-'}</td>
             </tr>
         `;
     });
